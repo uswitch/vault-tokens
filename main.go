@@ -2,12 +2,14 @@ package main
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/binary"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 
@@ -15,10 +17,16 @@ import (
 )
 
 var (
-	vaultServer = os.Getenv("VAULT_SERVER")
-	vaultToken  = os.Getenv("VAULT_TOKEN")
-	vaultCaPath = os.Getenv("VAULT_CAPATH")
-	configPath  = os.Getenv("CONFIG_PATH")
+	vaultServer   = os.Getenv("VAULT_SERVER")
+	vaultToken    = os.Getenv("VAULT_TOKEN")
+	vaultCaPath   = os.Getenv("VAULT_CAPATH")
+	configPath    = os.Getenv("CONFIG_PATH")
+	redirect      = os.Getenv("REDIRECT")
+	allowedGroups = []string{}
+)
+
+const (
+	redirectToLocalhost = "http://localhost:63974/authed"
 )
 
 type userDetails struct {
@@ -28,39 +36,43 @@ type userDetails struct {
 
 func main() {
 
-	if vaultServer == "" || vaultToken == "" || vaultCaPath == "" || configPath == "" {
-		fmt.Println("You need to supply VAULT_TOKEN, VAULT_SERVER, VAULT_CAPATH and CONFIG_PATH")
+	if vaultServer == "" || vaultToken == "" || vaultCaPath == "" {
+		fmt.Println("You need to supply VAULT_TOKEN, VAULT_SERVER, VAULT_CAPATH")
 		os.Exit(1)
 	}
 
-	allowedGroups, err := readConfig(configPath)
-	if err != nil {
-		fmt.Printf("Could not read csv file: %s", err)
-		os.Exit(1)
+	if configPath != "" {
+		var err error
+		allowedGroups, err = readConfig(configPath)
+		if err != nil {
+			fmt.Printf("Could not read csv file: %s", err)
+			os.Exit(1)
+		}
 	}
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+
 		if r.Method != "GET" {
 			w.WriteHeader(405)
 			fmt.Fprint(w, "Method not allowed")
 			return
 		}
 
+		//Split the groups into an array
+		groups := strings.Split(r.Header.Get("X-FORWARDED-GROUPS"), "|")
+
 		//Filter for the groups defined in the config file
-		groups, err := filterGroups(r.Header.Get("HTTP_X_FORWARDED_GROUPS"), allowedGroups)
-		if err != nil {
-			w.WriteHeader(500)
-			fmt.Fprintf(w, "Failed to parse Groups: %s", err)
-			return
-		}
-		if len(groups) == 0 {
-			w.WriteHeader(500)
-			fmt.Fprintf(w, "User has no allowed groups")
-			return
+		if len(allowedGroups) != 0 {
+			groups = filterGroups(groups, allowedGroups)
+			if len(groups) == 0 {
+				w.WriteHeader(500)
+				fmt.Fprintf(w, "User has no allowed groups")
+				return
+			}
 		}
 
 		user := userDetails{
-			Name:   r.Header.Get("HTTP_X_FORWARDED_USER"),
+			Name:   r.Header.Get("X-FORWARDED-USER"),
 			Groups: groups,
 		}
 
@@ -86,7 +98,23 @@ func main() {
 			return
 		}
 		binary.Write(&binBuf, binary.BigEndian, resp)
-		w.Write(binBuf.Bytes())
+
+		// if redirect is true will send the token back to the redirect url otherwise it just writes out the token in reponse
+		if redirect == "true" {
+			redirectURL, err := url.Parse(redirectToLocalhost)
+			if err != nil {
+				w.WriteHeader(500)
+				fmt.Fprint(w, "Error generating redirect")
+				return
+			}
+			q := redirectURL.Query()
+			q.Set("status", "ok")
+			q.Set("config", base64.URLEncoding.EncodeToString(binBuf.Bytes()))
+			redirectURL.RawQuery = q.Encode()
+			http.Redirect(w, r, redirectURL.String(), http.StatusTemporaryRedirect)
+		} else {
+			w.Write(binBuf.Bytes())
+		}
 
 	})
 	log.Fatal(http.ListenAndServe(":8080", nil))
@@ -137,9 +165,7 @@ func readConfig(configPath string) ([]string, error) {
 	return allowedGroups, nil
 }
 
-func filterGroups(groupString string, allowedGroups []string) ([]string, error) {
-	groups := strings.Split(groupString, "|")
-
+func filterGroups(groups, allowedGroups []string) []string {
 	filteredGroups := []string{}
 
 	for _, g := range groups {
@@ -150,5 +176,5 @@ func filterGroups(groupString string, allowedGroups []string) ([]string, error) 
 		}
 	}
 
-	return filteredGroups, nil
+	return filteredGroups
 }
