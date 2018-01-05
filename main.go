@@ -17,12 +17,11 @@ import (
 )
 
 var (
-	vaultServer   = os.Getenv("VAULT_SERVER")
-	vaultToken    = os.Getenv("VAULT_TOKEN")
-	vaultCaPath   = os.Getenv("VAULT_CAPATH")
-	configPath    = os.Getenv("CONFIG_PATH")
-	redirect      = os.Getenv("REDIRECT")
-	allowedGroups = []string{}
+	vaultServer = os.Getenv("VAULT_SERVER")
+	vaultToken  = os.Getenv("VAULT_TOKEN")
+	vaultCaPath = os.Getenv("VAULT_CAPATH")
+	configPath  = os.Getenv("CONFIG_PATH")
+	redirect    = os.Getenv("REDIRECT")
 )
 
 const (
@@ -40,6 +39,8 @@ func main() {
 		fmt.Println("You need to supply VAULT_TOKEN, VAULT_SERVER, VAULT_CAPATH")
 		os.Exit(1)
 	}
+
+	allowedGroups := []string{}
 
 	if configPath != "" {
 		var err error
@@ -99,7 +100,7 @@ func main() {
 		}
 		binary.Write(&binBuf, binary.BigEndian, resp)
 
-		// if redirect is true will send the token back to the redirect url otherwise it just writes out the token in reponse
+		// if redirect is true will send the token back to the redirect url otherwise it just writes out the token in response
 		if redirect == "true" {
 			redirectURL, err := url.Parse(redirectToLocalhost)
 			if err != nil {
