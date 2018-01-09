@@ -125,7 +125,7 @@ func generateToken(client *vault.Client, user userDetails) (*vault.Secret, error
 	auth := client.Auth()
 	tokenAuth := auth.Token()
 	secret, err := tokenAuth.Create(&vault.TokenCreateRequest{
-		TTL:         "60",
+		TTL:         "1h",
 		DisplayName: user.Name,
 		Policies:    user.Groups,
 	})
