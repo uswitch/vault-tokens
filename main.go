@@ -124,10 +124,12 @@ func main() {
 func generateToken(client *vault.Client, user userDetails) (*vault.Secret, error) {
 	auth := client.Auth()
 	tokenAuth := auth.Token()
+	renew := false
 	secret, err := tokenAuth.Create(&vault.TokenCreateRequest{
-		TTL:         "1h",
+		TTL:         "4h",
 		DisplayName: user.Name,
 		Policies:    user.Groups,
+		Renewable:   &renew,
 	})
 	if err != nil {
 		return &vault.Secret{}, err
