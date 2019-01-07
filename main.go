@@ -130,7 +130,6 @@ func generateToken(client *vault.Client, user userDetails) (*vault.Secret, error
 	auth := client.Auth()
 	tokenAuth := auth.Token()
 	renew := false
-	log.Println(user.Groups)
 	secret, err := tokenAuth.CreateWithRole(&vault.TokenCreateRequest{
 		TTL:            "12h",
 		DisplayName:    user.Name,
@@ -177,7 +176,6 @@ func newVaultClient(server string, ca string) (*vault.Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error parsing response: %s", err)
 	}
-	log.Println(secret.Auth.Policies)
 
 	client.SetToken(secret.Auth.ClientToken)
 
