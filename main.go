@@ -25,6 +25,7 @@ var (
 	redirect      = kingpin.Flag("redirect", "Path to config file containing allowed groups").Bool()
 	kubeLoginPath = kingpin.Flag("login-path", "Path login to vault").String()
 	authRole      = kingpin.Flag("role", "Role to get from vault").String()
+	tokenRole     = kingpin.Flag("token-role", "Role to use when creating token").String()
 )
 
 const (
@@ -47,12 +48,17 @@ func main() {
 
 	allowedGroups := []string{}
 
+	vaultClient, err := newVaultClient(*vaultServer, *vaultCaPath)
+	if err != nil {
+		log.Fatalf("Failed to create vault client: %s", err)
+		return
+	}
+
 	if *configPath != "" {
 		var err error
 		allowedGroups, err = readConfig(*configPath)
 		if err != nil {
-			fmt.Printf("Could not read csv file: %s", err)
-			os.Exit(1)
+			log.Fatalf("Could not read csv file: %s", err)
 		}
 	}
 
@@ -82,12 +88,6 @@ func main() {
 			Groups: groups,
 		}
 
-		vaultClient, err := newVaultClient(*vaultServer, *vaultCaPath)
-		if err != nil {
-			w.WriteHeader(500)
-			fmt.Fprintf(w, "Failed to create vault client: %s", err)
-			return
-		}
 		token, err := generateToken(vaultClient, user)
 		if err != nil {
 			w.WriteHeader(500)
@@ -130,13 +130,14 @@ func generateToken(client *vault.Client, user userDetails) (*vault.Secret, error
 	auth := client.Auth()
 	tokenAuth := auth.Token()
 	renew := false
-	secret, err := tokenAuth.Create(&vault.TokenCreateRequest{
+	log.Println(user.Groups)
+	secret, err := tokenAuth.CreateWithRole(&vault.TokenCreateRequest{
 		TTL:            "12h",
 		DisplayName:    user.Name,
 		Policies:       user.Groups,
 		Renewable:      &renew,
 		ExplicitMaxTTL: "12h",
-	})
+	}, *tokenRole)
 	if err != nil {
 		return &vault.Secret{}, err
 	}
@@ -176,6 +177,7 @@ func newVaultClient(server string, ca string) (*vault.Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error parsing response: %s", err)
 	}
+	log.Println(secret.Auth.Policies)
 
 	client.SetToken(secret.Auth.ClientToken)
 

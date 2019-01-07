@@ -15,7 +15,7 @@ pipeline:
 
   docker-branch:
     image: plugins/docker
-    repo: quay.io/uswitch/vault-webhook
+    repo: quay.io/uswitch/vault-tokens
     registry: quay.io
     secrets: [ docker_username, docker_password ]
     tags:
