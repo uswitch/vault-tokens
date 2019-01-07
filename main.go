@@ -19,12 +19,12 @@ import (
 )
 
 var (
-	vaultServer   = kingpin.Flag("vault-addr", "Vault address, e.g. https://vault:8200").String()
-	vaultCaPath   = kingpin.Flag("ca-cert", "Path to CA certificate/certificate folder to validate Vault server").String()
+	vaultServer   = kingpin.Flag("vault-addr", "Vault address, e.g. https://vault:8200").Required().String()
+	vaultCaPath   = kingpin.Flag("ca-cert", "Path to CA certificate/certificate folder to validate Vault server").Required().String()
 	configPath    = kingpin.Flag("config-path", "Path to config file containing allowed groups").String()
-	redirect      = kingpin.Flag("redirect", "Path to config file containing allowed groups").Bool()
-	kubeLoginPath = kingpin.Flag("login-path", "Path login to vault").String()
-	authRole      = kingpin.Flag("role", "Role to get from vault").String()
+	redirect      = kingpin.Flag("redirect", "redirect responses to http://localhost:63974/authed").Bool()
+	kubeLoginPath = kingpin.Flag("login-path", "Path login to vault").Required().String()
+	authRole      = kingpin.Flag("role", "Role to get from vault").Required().String()
 	tokenRole     = kingpin.Flag("token-role", "Role to use when creating token").String()
 )
 
