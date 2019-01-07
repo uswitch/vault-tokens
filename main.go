@@ -7,6 +7,7 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"net/url"
@@ -14,14 +15,17 @@ import (
 	"strings"
 
 	vault "github.com/hashicorp/vault/api"
+	kingpin "gopkg.in/alecthomas/kingpin.v2"
 )
 
 var (
-	vaultServer = os.Getenv("VAULT_SERVER")
-	vaultToken  = os.Getenv("VAULT_TOKEN")
-	vaultCaPath = os.Getenv("VAULT_CAPATH")
-	configPath  = os.Getenv("CONFIG_PATH")
-	redirect    = os.Getenv("REDIRECT")
+	vaultServer   = kingpin.Flag("vault-addr", "Vault address, e.g. https://vault:8200").Required().String()
+	vaultCaPath   = kingpin.Flag("ca-cert", "Path to CA certificate/certificate folder to validate Vault server").Required().String()
+	configPath    = kingpin.Flag("config-path", "Path to config file containing allowed groups").String()
+	redirect      = kingpin.Flag("redirect", "redirect responses to http://localhost:63974/authed").Bool()
+	kubeLoginPath = kingpin.Flag("login-path", "Path login to vault").Required().String()
+	authRole      = kingpin.Flag("role", "Role to get from vault").Required().String()
+	tokenRole     = kingpin.Flag("token-role", "Role to use when creating token").String()
 )
 
 const (
@@ -33,21 +37,28 @@ type userDetails struct {
 	Groups []string `json:"group"`
 }
 
+type login struct {
+	JWT  string `json:"jwt"`
+	Role string `json:"role"`
+}
+
 func main() {
 
-	if vaultServer == "" || vaultToken == "" || vaultCaPath == "" {
-		fmt.Println("You need to supply VAULT_TOKEN, VAULT_SERVER, VAULT_CAPATH")
-		os.Exit(1)
-	}
+	kingpin.Parse()
 
 	allowedGroups := []string{}
 
-	if configPath != "" {
+	vaultClient, err := newVaultClient(*vaultServer, *vaultCaPath)
+	if err != nil {
+		log.Fatalf("Failed to create vault client: %s", err)
+		return
+	}
+
+	if *configPath != "" {
 		var err error
-		allowedGroups, err = readConfig(configPath)
+		allowedGroups, err = readConfig(*configPath)
 		if err != nil {
-			fmt.Printf("Could not read csv file: %s", err)
-			os.Exit(1)
+			log.Fatalf("Could not read csv file: %s", err)
 		}
 	}
 
@@ -77,12 +88,6 @@ func main() {
 			Groups: groups,
 		}
 
-		vaultClient, err := newVaultClient(vaultServer, vaultCaPath)
-		if err != nil {
-			w.WriteHeader(500)
-			fmt.Fprintf(w, "Failed to create vault client: %s", err)
-			return
-		}
 		token, err := generateToken(vaultClient, user)
 		if err != nil {
 			w.WriteHeader(500)
@@ -101,7 +106,7 @@ func main() {
 		binary.Write(&binBuf, binary.BigEndian, resp)
 
 		// if redirect is true will send the token back to the redirect url otherwise it just writes out the token in response
-		if redirect == "true" {
+		if *redirect {
 			redirectURL, err := url.Parse(redirectToLocalhost)
 			if err != nil {
 				w.WriteHeader(500)
@@ -125,13 +130,13 @@ func generateToken(client *vault.Client, user userDetails) (*vault.Secret, error
 	auth := client.Auth()
 	tokenAuth := auth.Token()
 	renew := false
-	secret, err := tokenAuth.Create(&vault.TokenCreateRequest{
+	secret, err := tokenAuth.CreateWithRole(&vault.TokenCreateRequest{
 		TTL:            "12h",
 		DisplayName:    user.Name,
 		Policies:       user.Groups,
 		Renewable:      &renew,
 		ExplicitMaxTTL: "12h",
-	})
+	}, *tokenRole)
 	if err != nil {
 		return &vault.Secret{}, err
 	}
@@ -140,7 +145,7 @@ func generateToken(client *vault.Client, user userDetails) (*vault.Secret, error
 
 func newVaultClient(server string, ca string) (*vault.Client, error) {
 	config := &vault.Config{
-		Address: vaultServer,
+		Address: *vaultServer,
 	}
 	config.ConfigureTLS(&vault.TLSConfig{
 		CAPath: ca,
@@ -149,6 +154,31 @@ func newVaultClient(server string, ca string) (*vault.Client, error) {
 	if err != nil {
 		return &vault.Client{}, err
 	}
+
+	bytes, err := ioutil.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/token")
+	if err != nil {
+		return nil, fmt.Errorf("error reading token: %s", err)
+	}
+
+	req := client.NewRequest("POST", fmt.Sprintf("/v1/auth/%s", *kubeLoginPath))
+	req.SetJSONBody(&login{JWT: string(bytes), Role: *authRole})
+	resp, err := client.RawRequest(req)
+	if err != nil {
+		return nil, err
+	}
+
+	if resp.Error() != nil {
+		return nil, resp.Error()
+	}
+
+	var secret vault.Secret
+	err = json.NewDecoder(resp.Body).Decode(&secret)
+	if err != nil {
+		return nil, fmt.Errorf("error parsing response: %s", err)
+	}
+
+	client.SetToken(secret.Auth.ClientToken)
+
 	return client, nil
 }
 

@@ -4,14 +4,25 @@ workspace:
 
 pipeline:
   test:
-    image: golang:1.9
+    image: golang:1.11
     commands:
       - go test -v -cover $(go list ./... | grep -v /vendor)
 
   build:
-    image: golang:1.9
+    image: golang:1.11
     commands:
       - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o bin/vault-tokens
+
+  docker-branch:
+    image: plugins/docker
+    repo: quay.io/uswitch/vault-tokens
+    registry: quay.io
+    secrets: [ docker_username, docker_password ]
+    tags:
+      - ${DRONE_COMMIT_SHA}
+      - ${DRONE_COMMIT_BRANCH}
+    when:
+      event: push
 
   docker-latest:
     image: plugins/docker
